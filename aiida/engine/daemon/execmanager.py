@@ -161,8 +161,8 @@ def upload_calculation(node, transport, calc_info, script_filename, dry_run=Fals
 
         # Note, once #2579 is implemented, use the `node.open` method instead of the named temporary file in
         # combination with the new `Transport.put_object_from_filelike`
-        with NamedTemporaryFile(mode='w+') as handle:
-            handle.write(data_node.get_object_content(filename))
+        with NamedTemporaryFile(mode='bw+') as handle:
+            handle.write(data_node.get_object_content(filename, mode='rb'))
             handle.flush()
             transport.put(handle.name, target)
 

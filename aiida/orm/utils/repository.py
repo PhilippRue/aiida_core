@@ -126,12 +126,12 @@ class Repository(object):  # pylint: disable=useless-object-inheritance
 
         return File(filename, FileType.FILE)
 
-    def get_object_content(self, key):
+    def get_object_content(self, key, mode='r'):
         """Return the content of a object identified by key.
 
         :param key: fully qualified identifier for the object within the repository
         """
-        with self.open(key) as handle:
+        with self.open(key, mode) as handle:
             return handle.read()
 
     def put_object_from_tree(self, path, key=None, contents_only=True, force=False):
