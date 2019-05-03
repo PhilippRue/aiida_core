@@ -7,6 +7,11 @@
 # For further information on the license, see the LICENSE.txt file        #
 # For further information please visit http://www.aiida.net               #
 ###########################################################################
+# pylint: disable=invalid-name, import-error, no-name-in-module
+"""
+This file contains the majority of the migration tests that are too short to
+go to a separate file.
+"""
 from __future__ import division
 from __future__ import print_function
 from __future__ import absolute_import
@@ -15,78 +20,13 @@ from six.moves import range
 
 import numpy
 
-from django.apps import apps
-from django.db.migrations.executor import MigrationExecutor
-from django.db import connection
-
 from aiida.backends.testbase import AiidaTestCase
 from aiida.backends.djsite.db.migrations import ModelModifierV0025
 from aiida.backends.general.migrations import utils
 from aiida.common.exceptions import IntegrityError
 from aiida.manage.database.integrity.duplicate_uuid import deduplicate_uuids, verify_uuid_uniqueness
 
-
-class TestMigrations(AiidaTestCase):
-    @property
-    def app(self):
-        return apps.get_containing_app_config(type(self).__module__).name.split('.')[-1]
-
-    migrate_from = None
-    migrate_to = None
-
-    def setUp(self):
-        """Go to a specific schema version before running tests."""
-        from aiida.orm import autogroup
-
-        self.current_autogroup = autogroup.current_autogroup
-        autogroup.current_autogroup = None
-        assert self.migrate_from and self.migrate_to, \
-            "TestCase '{}' must define migrate_from and migrate_to properties".format(type(self).__name__)
-        self.migrate_from = [(self.app, self.migrate_from)]
-        self.migrate_to = [(self.app, self.migrate_to)]
-        executor = MigrationExecutor(connection)
-        self.apps = executor.loader.project_state(self.migrate_from).apps
-
-        # Reverse to the original migration
-        executor.migrate(self.migrate_from)
-
-        self.default_user = self.backend.users.create('{}@aiida.net'.format(self.id())).store()
-        self.DbNode = self.apps.get_model('db', 'DbNode')
-
-        try:
-            self.setUpBeforeMigration()
-            # Run the migration to test
-            executor = MigrationExecutor(connection)
-            executor.loader.build_graph()
-            executor.migrate(self.migrate_to)
-
-            self.apps = executor.loader.project_state(self.migrate_to).apps
-        except Exception as exception:
-            # Bring back the DB to the correct state if this setup part fails
-            import traceback
-            traceback.print_stack()
-            print('EXCEPTION', exception)
-            self._revert_database_schema()
-            raise
-
-    def tearDown(self):
-        """At the end make sure we go back to the latest schema version."""
-        from aiida.orm import autogroup
-        self._revert_database_schema()
-        autogroup.current_autogroup = self.current_autogroup
-
-    def setUpBeforeMigration(self):
-        """Anything to do before running the migrations, which should be implemented in test subclasses."""
-
-    def _revert_database_schema(self):
-        """Bring back the DB to the correct state."""
-        from ..migrations import LATEST_MIGRATION
-        self.migrate_to = [(self.app, LATEST_MIGRATION)]
-        executor = MigrationExecutor(connection)
-        executor.migrate(self.migrate_to)
-
-    def load_node(self, pk):
-        return self.DbNode.objects.get(pk=pk)
+from .test_migrations_common import TestMigrations
 
 
 class TestMigrationsModelModifierV0025(TestMigrations):
@@ -97,7 +37,7 @@ class TestMigrationsModelModifierV0025(TestMigrations):
         modifier = ModelModifierV0025(self.apps, DbAttribute)
         modifier.set_value_for_node(node.pk, key, value)
 
-    def get_attribute(self, node, key, default=None):
+    def get_attribute(self, node, key, default=None):  # pylint: disable=missing-docstring
         DbAttribute = self.apps.get_model('db', 'DbAttribute')
         modifier = ModelModifierV0025(self.apps, DbAttribute)
         try:
@@ -105,7 +45,8 @@ class TestMigrationsModelModifierV0025(TestMigrations):
         except AttributeError:
             return default
 
-    def get_node_array(self, node, name):
+    @staticmethod
+    def get_node_array(node, name):
         return utils.load_numpy_array_from_repository(node.uuid, name)
 
     def set_node_array(self, node, name, array):
@@ -121,11 +62,13 @@ class TestMigrationsModelModifierV0025(TestMigrations):
 
 
 class TestNoMigrations(AiidaTestCase):
+    """Verify that no django migrations remain."""
 
-    def test_no_remaining_migrations(self):
-        """Verify that no django migrations remain.
-
-        Equivalent to python manage.py makemigrations --check"""
+    def test_no_remaining_migrations(self):  # pylint: disable=no-self-use
+        """
+        Verify that no django migrations remain.
+        Equivalent to python manage.py makemigrations --check
+        """
 
         from django.core.management import call_command
 
@@ -134,6 +77,7 @@ class TestNoMigrations(AiidaTestCase):
 
 
 class TestDuplicateNodeUuidMigration(TestMigrations):
+    """Test the migration that verifies that there are no duplicate UUIDs"""
 
     migrate_from = '0013_django_1_8'
     migrate_to = '0014_add_node_uuid_unique_constraint'
@@ -157,13 +101,13 @@ class TestDuplicateNodeUuidMigration(TestMigrations):
         self.nodes_boolean.append(node_bool)
         self.nodes_integer.append(node_int)
 
-        for i in range(self.n_bool_duplicates):
+        for _ in range(self.n_bool_duplicates):
             node = self.DbNode(type='data.bool.Bool.', user_id=self.default_user.id, uuid=node_bool.uuid)
             node.save()
             utils.put_object_from_string(node.uuid, self.file_name, self.file_content)
             self.nodes_boolean.append(node)
 
-        for i in range(self.n_int_duplicates):
+        for _ in range(self.n_int_duplicates):
             node = self.DbNode(type='data.int.Int.', user_id=self.default_user.id, uuid=node_int.uuid)
             node.save()
             utils.put_object_from_string(node.uuid, self.file_name, self.file_content)
@@ -196,6 +140,11 @@ class TestDuplicateNodeUuidMigration(TestMigrations):
 
 
 class TestUuidMigration(TestMigrations):
+    """
+    This test class checks the migration 0018_django_1_11 which switches from the django_extensions
+    UUID field to the native UUIDField of django 1.11. It also introduces unique constraints
+    on all uuid columns (previously existed only on dbnode).
+    """
 
     migrate_from = '0017_drop_dbcalcstate'
     migrate_to = '0018_django_1_11'
@@ -214,6 +163,10 @@ class TestUuidMigration(TestMigrations):
 
 
 class TestGroupRenamingMigration(TestMigrations):
+    """
+    This test class checks the migration 0022_dbgroup_type_string_change_content which updates the
+    type_string column of the groups.
+    """
 
     migrate_from = '0021_dbgroup_name_to_label_type_to_type_string'
     migrate_to = '0022_dbgroup_type_string_change_content'
@@ -228,7 +181,8 @@ class TestGroupRenamingMigration(TestMigrations):
         self.group_user_pk = group_user.pk
 
         # test data.upf group type_string: 'data.upf.family' -> 'data.upf'
-        group_data_upf = DbGroup(label='test_data_upf_group', user_id=self.default_user.id, type_string='data.upf.family')
+        group_data_upf = DbGroup(
+            label='test_data_upf_group', user_id=self.default_user.id, type_string='data.upf.family')
         group_data_upf.save()
         self.group_data_upf_pk = group_data_upf.pk
 
@@ -243,6 +197,7 @@ class TestGroupRenamingMigration(TestMigrations):
         self.group_autorun_pk = group_autorun.pk
 
     def test_group_string_update(self):
+        """ Test that the type_string were updated correctly """
         DbGroup = self.apps.get_model('db', 'DbGroup')
 
         # test user group type_string: '' -> 'user'
@@ -263,6 +218,10 @@ class TestGroupRenamingMigration(TestMigrations):
 
 
 class TestCalcAttributeKeysMigration(TestMigrationsModelModifierV0025):
+    """
+    This test class checks that the migration 0023_calc_job_option_attribute_keys works as expected
+    which migrates CalcJobNode attributes for metadata options whose key changed.
+    """
 
     migrate_from = '0022_dbgroup_type_string_change_content'
     migrate_to = '0023_calc_job_option_attribute_keys'
@@ -310,31 +269,39 @@ class TestCalcAttributeKeysMigration(TestMigrationsModelModifierV0025):
 
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_PROCESS_LABEL_NEW), self.process_label)
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_RESOURCES_NEW), self.resources)
-        self.assertEqual(self.get_attribute(self.node_calc, self.KEY_ENVIRONMENT_VARIABLES_NEW), self.environment_variables)
+        self.assertEqual(
+            self.get_attribute(self.node_calc, self.KEY_ENVIRONMENT_VARIABLES_NEW), self.environment_variables)
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_PARSER_NAME_NEW), self.parser_name)
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_PROCESS_LABEL_OLD, default=NOT_FOUND), NOT_FOUND)
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_RESOURCES_OLD, default=NOT_FOUND), NOT_FOUND)
-        self.assertEqual(self.get_attribute(self.node_calc, self.KEY_ENVIRONMENT_VARIABLES_OLD, default=NOT_FOUND), NOT_FOUND)
+        self.assertEqual(
+            self.get_attribute(self.node_calc, self.KEY_ENVIRONMENT_VARIABLES_OLD, default=NOT_FOUND), NOT_FOUND)
         self.assertEqual(self.get_attribute(self.node_calc, self.KEY_PARSER_NAME_OLD, default=NOT_FOUND), NOT_FOUND)
 
         # The following node should not be migrated even if its attributes have the matching keys because
         # the node is not a ProcessNode
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_PROCESS_LABEL_OLD), self.process_label)
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_RESOURCES_OLD), self.resources)
-        self.assertEqual(self.get_attribute(self.node_other, self.KEY_ENVIRONMENT_VARIABLES_OLD), self.environment_variables)
+        self.assertEqual(
+            self.get_attribute(self.node_other, self.KEY_ENVIRONMENT_VARIABLES_OLD), self.environment_variables)
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_PARSER_NAME_OLD), self.parser_name)
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_PROCESS_LABEL_NEW, default=NOT_FOUND), NOT_FOUND)
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_RESOURCES_NEW, default=NOT_FOUND), NOT_FOUND)
-        self.assertEqual(self.get_attribute(self.node_other, self.KEY_ENVIRONMENT_VARIABLES_NEW, default=NOT_FOUND), NOT_FOUND)
+        self.assertEqual(
+            self.get_attribute(self.node_other, self.KEY_ENVIRONMENT_VARIABLES_NEW, default=NOT_FOUND), NOT_FOUND)
         self.assertEqual(self.get_attribute(self.node_other, self.KEY_PARSER_NAME_NEW, default=NOT_FOUND), NOT_FOUND)
 
 
 class TestDbLogMigrationRecordCleaning(TestMigrations):
+    """
+    This test class checks that the migration 0024_dblog_update works as expected.
+    That migration updates of the DbLog table and adds uuids
+    """
 
     migrate_from = '0023_calc_job_option_attribute_keys'
     migrate_to = '0024_dblog_update'
 
-    def setUpBeforeMigration(self):
+    def setUpBeforeMigration(self):  # pylint: disable=too-many-locals
         import json
         import importlib
         from aiida.backends.sqlalchemy.utils import dumps_json
@@ -445,22 +412,20 @@ class TestDbLogMigrationRecordCleaning(TestMigrations):
         )
 
         # Getting the serialized Dict logs
-        param_data = DbLog.objects.filter(objpk=param.pk).filter(objname='something.else.').values(
-            *update_024.values_to_export)[:1]
+        param_data = DbLog.objects.filter(objpk=param.pk).filter(
+            objname='something.else.').values(*update_024.values_to_export)[:1]
         serialized_param_data = dumps_json(list(param_data))
         # Getting the serialized logs for the unknown entity logs (as the export migration fuction
         # provides them) - this should coincide to the above
         serialized_unknown_exp_logs = update_024.get_serialized_unknown_entity_logs(DbLog)
         # Getting their number
         unknown_exp_logs_number = update_024.get_unknown_entity_log_number(DbLog)
-        self.to_check['Dict'] = (serialized_param_data, serialized_unknown_exp_logs,
-                                          unknown_exp_logs_number)
+        self.to_check['Dict'] = (serialized_param_data, serialized_unknown_exp_logs, unknown_exp_logs_number)
 
         # Getting the serialized legacy workflow logs
-        leg_wf = DbLog.objects.filter(
-            objpk=leg_workf.pk).filter(
+        leg_wf = DbLog.objects.filter(objpk=leg_workf.pk).filter(
             objname='aiida.workflows.user.topologicalworkflows.topo.TopologicalWorkflow').values(
-            *update_024.values_to_export)[:1]
+                *update_024.values_to_export)[:1]
         serialized_leg_wf_logs = dumps_json(list(leg_wf))
         # Getting the serialized logs for the legacy workflow logs (as the export migration function
         # provides them) - this should coincide to the above
@@ -469,9 +434,7 @@ class TestDbLogMigrationRecordCleaning(TestMigrations):
         self.to_check['WorkflowNode'] = (serialized_leg_wf_logs, serialized_leg_wf_exp_logs, eg_wf_exp_logs_number)
 
         # Getting the serialized logs that don't correspond to a DbNode record
-        logs_no_node = DbLog.objects.filter(
-            id__in=[log_5.id, log_6.id]).values(
-            *update_024.values_to_export)
+        logs_no_node = DbLog.objects.filter(id__in=[log_5.id, log_6.id]).values(*update_024.values_to_export)
         serialized_logs_no_node = dumps_json(list(logs_no_node))
         # Getting the serialized logs that don't correspond to a node (as the export migration function
         # provides them) - this should coincide to the above
@@ -523,8 +486,9 @@ class TestDbLogMigrationRecordCleaning(TestMigrations):
         self.assertEqual(self.to_check['WorkflowNode'][0], self.to_check['WorkflowNode'][1])
         self.assertEqual(self.to_check['WorkflowNode'][2], 1)
 
-        self.assertEqual(sorted(list(json.loads(self.to_check['NoNode'][0])), key=lambda k: k['id']),
-                         sorted(list(json.loads(self.to_check['NoNode'][1])), key=lambda k: k['id']))
+        self.assertEqual(
+            sorted(list(json.loads(self.to_check['NoNode'][0])), key=lambda k: k['id']),
+            sorted(list(json.loads(self.to_check['NoNode'][1])), key=lambda k: k['id']))
         self.assertEqual(self.to_check['NoNode'][2], 2)
 
     def test_dblog_unique_uuids(self):
@@ -556,6 +520,7 @@ class TestDbLogMigrationBackward(TestMigrations):
     """
     Check that backward migrations work also for the DbLog migration(s).
     """
+
     migrate_from = '0024_dblog_update'
     migrate_to = '0023_calc_job_option_attribute_keys'
 
@@ -616,26 +581,36 @@ class TestDbLogMigrationBackward(TestMigrations):
         DbLog = self.apps.get_model('db', 'DbLog')
 
         # Check that only two log records exist with the correct objpk objname
-        for log_pk in self.to_check.keys():
+        for log_pk, to_check_value in self.to_check.items():
             log_entry = DbLog.objects.filter(pk=log_pk)[:1].get()
-            log_dbnode_id, type = self.to_check[log_pk]
-            self.assertEqual(log_dbnode_id, log_entry.objpk,
-                             "The dbnode_id ({}) of the 0024 schema version should be identical to the objpk ({}) of "
-                             "the 0023 schema version.".format(log_dbnode_id, log_entry.objpk))
-            self.assertEqual(type, log_entry.objname,
-                             "The type ({}) of the linked node of the 0024 schema version should be identical to the "
-                             "objname ({}) of the 0023 schema version.".format(type, log_entry.objname))
-            self.assertEqual(log_dbnode_id, json.loads(log_entry.metadata)['objpk'],
-                             "The dbnode_id ({}) of the 0024 schema version should be identical to the objpk ({}) of "
-                             "the 0023 schema version stored in the metadata.".format(
-                                 log_dbnode_id, json.loads(log_entry.metadata)['objpk']))
-            self.assertEqual(type, json.loads(log_entry.metadata)['objname'],
-                             "The type ({}) of the linked node of the 0024 schema version should be identical to the "
-                             "objname ({}) of the 0023 schema version stored in the metadata.".format(
-                                 type, json.loads(log_entry.metadata)['objname']))
+            log_dbnode_id, node_type = to_check_value
+            self.assertEqual(
+                log_dbnode_id, log_entry.objpk,
+                "The dbnode_id ({}) of the 0024 schema version should be identical to the objpk ({}) of "
+                "the 0023 schema version.".format(log_dbnode_id, log_entry.objpk))
+            self.assertEqual(
+                node_type, log_entry.objname,
+                "The type ({}) of the linked node of the 0024 schema version should be identical to the "
+                "objname ({}) of the 0023 schema version.".format(node_type, log_entry.objname))
+            self.assertEqual(
+                log_dbnode_id,
+                json.loads(log_entry.metadata)['objpk'],
+                "The dbnode_id ({}) of the 0024 schema version should be identical to the objpk ({}) of "
+                "the 0023 schema version stored in the metadata.".format(log_dbnode_id,
+                                                                         json.loads(log_entry.metadata)['objpk']))
+            self.assertEqual(
+                node_type,
+                json.loads(log_entry.metadata)['objname'],
+                "The type ({}) of the linked node of the 0024 schema version should be identical to the "
+                "objname ({}) of the 0023 schema version stored in the metadata.".format(
+                    node_type,
+                    json.loads(log_entry.metadata)['objname']))
 
 
 class TestDataMoveWithinNodeMigration(TestMigrations):
+    """
+    Check that backward migrations work also for the DbLog migration(s).
+    """
 
     migrate_from = '0024_dblog_update'
     migrate_to = '0025_move_data_within_node_module'
@@ -655,16 +630,22 @@ class TestDataMoveWithinNodeMigration(TestMigrations):
 
 
 class TestTrajectoryDataMigration(TestMigrationsModelModifierV0025):
+    """
+    This test class checks that the migrations 0026_trajectory_symbols_to_attribute and
+    0027_delete_trajectory_symbols_array work as expected.
+    These are data migrations for `TrajectoryData` nodes where symbol lists are moved
+    from repository array to attributes.
+    """
 
     migrate_from = '0025_move_data_within_node_module'
     migrate_to = '0027_delete_trajectory_symbols_array'
 
     stepids = numpy.array([60, 70])
     times = stepids * 0.01
-    positions = numpy.array(
-        [[[0., 0., 0.], [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]], [[0., 0., 0.], [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]]])
-    velocities = numpy.array(
-        [[[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, -0.5, -0.5]]])
+    positions = numpy.array([[[0., 0., 0.], [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]],
+                             [[0., 0., 0.], [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]]])
+    velocities = numpy.array([[[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]],
+                              [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, -0.5, -0.5]]])
     cells = numpy.array([[[2., 0., 0.], [0., 2., 0.], [0., 0., 2.]], [[3., 0., 0.], [0., 3., 0.], [0., 0., 3.]]])
 
     def setUpBeforeMigration(self):
@@ -680,6 +661,7 @@ class TestTrajectoryDataMigration(TestMigrationsModelModifierV0025):
         self.set_node_array(self.node, 'velocities', self.velocities)
 
     def test_trajectory_symbols(self):
+        """ Check that the trajectories are migrated correctly """
         node = self.load_node(self.node.id)
         self.assertSequenceEqual(self.get_attribute(node, 'symbols'), ['H', 'O', 'C'])
         self.assertSequenceEqual(self.get_node_array(node, 'velocities').tolist(), self.velocities.tolist())
@@ -689,6 +671,12 @@ class TestTrajectoryDataMigration(TestMigrationsModelModifierV0025):
 
 
 class TestNodePrefixRemovalMigration(TestMigrations):
+    """
+    This test class checks that the migration 0028_remove_node_prefix works as expected.
+
+    That is the final data migration for `Nodes` after `aiida.orm.nodes` reorganization
+    was finalized to remove the `node.` prefix
+    """
 
     migrate_from = '0027_delete_trajectory_symbols_array'
     migrate_to = '0028_remove_node_prefix'
@@ -709,6 +697,11 @@ class TestNodePrefixRemovalMigration(TestMigrations):
 
 
 class TestParameterDataToDictMigration(TestMigrations):
+    """
+    This test class checks that the migration 0029_rename_parameter_data_to_dict works as expected.
+
+    This is a data migration for the renaming of `ParameterData` to `Dict`.
+    """
 
     migrate_from = '0028_remove_node_prefix'
     migrate_to = '0029_rename_parameter_data_to_dict'
@@ -723,7 +716,12 @@ class TestParameterDataToDictMigration(TestMigrations):
         self.assertEqual(node.type, 'data.dict.Dict.')
 
 
-class TestTextFieldToJSONFieldMigration(TestMigrations):
+class TestTextFieldToJSONFieldMigration(TestMigrations):  # pylint: disable=too-many-instance-attributes
+    """
+    This test class checks that the migration 0033_replace_text_field_with_json_field works as expected.
+
+    That migration replaces the use of text fields to store JSON data with builtin JSONFields.
+    """
 
     migrate_from = '0032_remove_legacy_workflows'
     migrate_to = '0033_replace_text_field_with_json_field'
@@ -739,7 +737,14 @@ class TestTextFieldToJSONFieldMigration(TestMigrations):
         self.node = self.DbNode(node_type="node.process.calculation.CalculationNode.", user_id=self.default_user.id)
         self.node.save()
 
-        self.computer_metadata = {'shebang': '#!/bin/bash', 'workdir': '/scratch/', 'append_text': '', 'prepend_text': '', 'mpirun_command': ['mpirun', '-np', '{tot_num_mpiprocs}'], 'default_mpiprocs_per_machine': 1}
+        self.computer_metadata = {
+            'shebang': '#!/bin/bash',
+            'workdir': '/scratch/',
+            'append_text': '',
+            'prepend_text': '',
+            'mpirun_command': ['mpirun', '-np', '{tot_num_mpiprocs}'],
+            'default_mpiprocs_per_machine': 1
+        }
         self.computer_transport_params = {'append_text': 'sometext\ntest', 'max_machines': 1}
         self.computer_kwargs = {
             'name': 'localhost_testing',
