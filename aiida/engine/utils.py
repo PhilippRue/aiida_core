@@ -239,7 +239,7 @@ def set_process_state_change_timestamp(process):
 
     :param process: the Process instance that changed its state
     """
-    from aiida.backends.utils import set_global_setting
+    from aiida.backends.utils import get_settings_manager
     from aiida.common import timezone
     from aiida.common.exceptions import UniquenessError
     from aiida.orm import ProcessNode, CalculationNode, WorkflowNode
@@ -259,7 +259,8 @@ def set_process_state_change_timestamp(process):
     value = timezone.now()
 
     try:
-        set_global_setting(key, value, description)
+        manager = get_settings_manager()
+        manager.set(key, value, description)
     except UniquenessError as exception:
         process.logger.debug('could not update the {} setting because of a UniquenessError: {}'.format(key, exception))
 
@@ -274,8 +275,9 @@ def get_process_state_change_timestamp(process_type=None):
         known process types will be returned.
     :return: a timestamp or None
     """
-    from aiida.backends.utils import get_global_setting
+    from aiida.backends.utils import get_settings_manager
 
+    manager = get_settings_manager()
     valid_process_types = ['calculation', 'work']
 
     if process_type is not None and process_type not in valid_process_types:
@@ -291,7 +293,7 @@ def get_process_state_change_timestamp(process_type=None):
     for process_type_key in process_types:
         key = PROCESS_STATE_CHANGE_KEY.format(process_type_key)
         try:
-            timestamps.append(get_global_setting(key))
+            timestamps.append(manager.get(key).time)
         except KeyError:
             pass
 

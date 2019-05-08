@@ -35,7 +35,9 @@ if __name__ == "__main__":
             actual_argv = [actual_argv[0]] + actual_argv[2:]
 
     # Load the general load_dbenv.
-    from aiida.backends.utils import load_dbenv
-    load_dbenv(profile=profile_name)
+    from aiida.manage.configuration import load_profile
+    from aiida.backends.utils import _load_dbenv_noschemacheck
+    profile = load_profile(profile_name)
+    _load_dbenv_noschemacheck(profile)
 
     execute_from_command_line(actual_argv)
