@@ -697,9 +697,11 @@ class DbMultipleValueAttributeBaseClass(m.Model):
           bulk_create() call).
         """
         import datetime
+        import numpy as np
 
         from aiida.common import json
         from aiida.common.timezone import is_naive, make_aware, get_current_timezone
+
 
         if cls._subspecifier_field_name is None:
             if subspecifier_value is not None:
@@ -735,7 +737,7 @@ class DbMultipleValueAttributeBaseClass(m.Model):
             new_entry.fval = None
             new_entry.dval = None
 
-        elif isinstance(value, six.integer_types):
+        elif isinstance(value, six.integer_types) or isinstance(value, np.integer):
             new_entry.datatype = 'int'
             new_entry.ival = value
             new_entry.tval = ''
@@ -743,7 +745,7 @@ class DbMultipleValueAttributeBaseClass(m.Model):
             new_entry.fval = None
             new_entry.dval = None
 
-        elif isinstance(value, float):
+        elif isinstance(value, float) or isinstance(value, np.floating):
             new_entry.datatype = 'float'
             new_entry.fval = value
             new_entry.tval = ''
@@ -819,6 +821,7 @@ class DbMultipleValueAttributeBaseClass(m.Model):
             try:
                 jsondata = json.dumps(value)
             except TypeError:
+                print(key, type(value), value)
                 raise ValueError("Unable to store the value: it must be either a basic datatype, or json-serializable: {}".format(value))
 
             new_entry.datatype = 'json'
